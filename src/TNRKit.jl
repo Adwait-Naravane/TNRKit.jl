@@ -50,6 +50,8 @@ include("schemes/impurityhotrg.jl")
 # Correlation methods
 include("schemes/correlationhotrg.jl")
 
+#Thermal TNR
+include("schemes/ttnr.jl")
 # Loop Methods
 include("schemes/looptnr.jl")
 include("schemes/symmetric_looptnr.jl")
@@ -63,6 +65,8 @@ export HOTRG
 export HOTRG_3D
 export ATRG
 export ATRG_3D
+export TNO, TNOTensor
+export ThermalTNR, apply!
 
 export CTM
 export Sublattice_CTM
