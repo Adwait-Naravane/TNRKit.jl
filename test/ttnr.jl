@@ -46,3 +46,19 @@ end
     scheme_bottom = ThermalTNR(TNO(local_tensor; unitcell = (1, 1)))
     @test apply!(scheme_top, scheme_bottom, truncrank(8)) isa ThermalTNR
 end
+
+@testset "ThermalTNR finalize!" begin
+    local_tensor = TensorMap(
+        reshape(collect(1.0:64.0), 2, 2, 2, 2, 2, 2),
+        ℂ^2 ⊗ (ℂ^2)' ← ℂ^2 ⊗ ℂ^2 ⊗ (ℂ^2)' ⊗ (ℂ^2)'
+    )
+
+    tno = TNO([copy(local_tensor) for _ in 1:2, _ in 1:2])
+    scheme = ThermalTNR(tno)
+    norms = finalize!(scheme)
+
+    @test size(norms) == (2, 2)
+    @test all(isfinite, norms)
+    @test all(n -> n > 0, norms)
+    @test all(norm(@tensor scheme.T[i, j][1 1; 2 3 2 3]) ≈ 1 for i in 1:2, j in 1:2)
+end

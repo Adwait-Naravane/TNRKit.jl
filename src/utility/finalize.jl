@@ -65,6 +65,17 @@ function finalize!(scheme::HOTRG_3D)
     return n
 end
 
+function finalize!(scheme::ThermalTNR)
+    norms = Matrix{Float64}(undef, size(scheme.T)...)
+    for i in axes(scheme.T, 1), j in axes(scheme.T, 2)
+        T = scheme.T[i, j]
+        n = norm(@tensor T[1 1; 2 3 2 3])
+        scheme.T[i, j] /= n
+        norms[i, j] = n
+    end
+    return norms
+end
+
 function finalize!(scheme::SLoopTNR)
     tr_norm = trnorm_2x2(scheme.T)
     scheme.T /= tr_norm^0.25
