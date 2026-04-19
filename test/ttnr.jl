@@ -55,10 +55,10 @@ end
 
     tno = TNO([copy(local_tensor) for _ in 1:2, _ in 1:2])
     scheme = ThermalTNR(tno)
-    norms = finalize!(scheme)
+    n = finalize!(scheme)
 
-    @test size(norms) == (2, 2)
-    @test all(isfinite, norms)
-    @test all(n -> n > 0, norms)
+    @test isfinite(n)
+    @test n > 0
+    @test n ≈ norm(@tensor local_tensor[1 1; 2 3 2 3])
     @test all(norm(@tensor scheme.T[i, j][1 1; 2 3 2 3]) ≈ 1 for i in 1:2, j in 1:2)
 end

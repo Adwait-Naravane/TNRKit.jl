@@ -66,14 +66,14 @@ function finalize!(scheme::HOTRG_3D)
 end
 
 function finalize!(scheme::ThermalTNR)
-    norms = Matrix{Float64}(undef, size(scheme.T)...)
+    log_norm_sum = 0.0
     for i in axes(scheme.T, 1), j in axes(scheme.T, 2)
         T = scheme.T[i, j]
         n = norm(@tensor T[1 1; 2 3 2 3])
         scheme.T[i, j] /= n
-        norms[i, j] = n
+        log_norm_sum += log(n)
     end
-    return norms
+    return exp(log_norm_sum / length(scheme.T))
 end
 
 function finalize!(scheme::SLoopTNR)
