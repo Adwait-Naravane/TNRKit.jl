@@ -64,6 +64,9 @@ TNO.
 ### Fields
 
 $(TYPEDFIELDS)
+
+### References
+* [Ueda et al. (2025)](@cite ueda_2025)
 """
 mutable struct ThermalTNR{E, S} <: TNRScheme{E, S}
     "Tensor network operator stored in the current TTNR layer."
