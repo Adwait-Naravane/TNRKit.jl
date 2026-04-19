@@ -57,6 +57,10 @@ TNO.
 ### Constructors
     $(FUNCTIONNAME)(T::TNO)
 
+### Running the algorithm
+    run!(::ThermalTNR, T::TNO, trunc::TruncationStrategy, criterion::stopcrit[
+              , finalizer=default_Finalizer, finalize_beginning=true, verbosity=1])
+
 ### Fields
 
 $(TYPEDFIELDS)
@@ -251,4 +255,61 @@ end
 function apply!(top::ThermalTNR, bottom::ThermalTNR, trunc::TruncationStrategy)
     top.T = apply!(top.T, bottom.T, trunc)
     return top
+end
+
+function step!(scheme::ThermalTNR, layer::TNO, trunc::TruncationStrategy)
+    scheme.T = apply!(scheme.T, layer, trunc)
+    return scheme
+end
+
+function step!(scheme::ThermalTNR, layer::ThermalTNR, trunc::TruncationStrategy)
+    return step!(scheme, layer.T, trunc)
+end
+
+function run!(
+        scheme::ThermalTNR, layer::TNO, trscheme::TruncationStrategy,
+        criterion::stopcrit, finalizer::Finalizer{E};
+        finalize_beginning = true, verbosity = 1
+    ) where {E}
+    data = Vector{E}()
+
+    LoggingExtras.withlevel(; verbosity) do
+        @infov 1 "Starting simulation\n $(scheme)\n"
+        if finalize_beginning
+            push!(data, finalizer.f!(scheme))
+        end
+
+        steps = 0
+        crit = true
+
+        t = @elapsed while crit
+            @infov 2 "Step $(steps + 1), data[end]: $(!isempty(data) ? data[end] : "empty")"
+            step!(scheme, layer, trscheme)
+            push!(data, finalizer.f!(scheme))
+
+            steps += 1
+            crit = criterion(steps, data)
+        end
+
+        @infov 1 "Simulation finished\n $(stopping_info(criterion, steps, data))\n Elapsed time: $(t)s\n Iterations: $steps"
+    end
+    return data
+end
+
+function run!(
+        scheme::ThermalTNR, layer::ThermalTNR, trscheme::TruncationStrategy,
+        criterion::stopcrit, finalizer::Finalizer{E}; kwargs...
+    ) where {E}
+    return run!(scheme, layer.T, trscheme, criterion, finalizer; kwargs...)
+end
+
+function run!(scheme::ThermalTNR, layer, trscheme, criterion; kwargs...)
+    return run!(scheme, layer, trscheme, criterion, default_Finalizer; kwargs...)
+end
+
+function Base.show(io::IO, scheme::ThermalTNR)
+    println(io, "ThermalTNR - Thermal Tensor Network Renormalization")
+    println(io, "  * T: $(summary(scheme.T))")
+    println(io, "  * unit cell: $(size(scheme.T))")
+    return nothing
 end
