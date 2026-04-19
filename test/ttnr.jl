@@ -19,6 +19,13 @@
     @test tno2[2, 1] ≈ local_tensor
 
     @test_throws ArgumentError TNO(local_tensor; unitcell = (0, 2))
+    @test_throws ArgumentError TNO(reshape(typeof(local_tensor)[], 0, 1))
+
+    tno_copy = copy(tno2)
+    @test tno_copy isa TNO
+    @test tno_copy !== tno2
+    @test tno_copy[1, 1] === tno2[1, 1]
+    @test tno_copy.A !== tno2.A
 end
 
 @testset "TNO apply!" begin
@@ -37,7 +44,7 @@ end
     @test space(merged[1, 1], 2) == space(bottom[1, 1], 2)
 
     bad_tensor = TensorMap(
-        reshape(collect(1.0:256.0), 2, 4, 2, 2, 2, 2),
+        reshape(collect(1.0:128.0), 2, 4, 2, 2, 2, 2),
         ℂ^2 ⊗ (ℂ^4)' ← ℂ^2 ⊗ ℂ^2 ⊗ (ℂ^2)' ⊗ (ℂ^2)'
     )
     @test_throws ArgumentError apply!(TNO(bad_tensor; unitcell = (2, 2)), bottom, truncrank(8))
@@ -61,4 +68,21 @@ end
     @test n > 0
     @test n ≈ norm(@tensor local_tensor[1 1; 2 3 2 3])
     @test all(norm(@tensor scheme.T[i, j][1 1; 2 3 2 3]) ≈ 1 for i in 1:2, j in 1:2)
+end
+
+@testset "ThermalTNR run!" begin
+    local_tensor = TensorMap(
+        reshape(collect(1.0:64.0), 2, 2, 2, 2, 2, 2),
+        ℂ^2 ⊗ (ℂ^2)' ← ℂ^2 ⊗ ℂ^2 ⊗ (ℂ^2)' ⊗ (ℂ^2)'
+    )
+
+    scheme = ThermalTNR(TNO(local_tensor; unitcell = (1, 1)))
+    layer = TNO(local_tensor; unitcell = (1, 1))
+    data = run!(scheme, layer, truncrank(8), maxiter(1))
+
+    @test data isa Vector{Float64}
+    @test length(data) == 2
+    @test all(isfinite, data)
+    @test all(n -> n > 0, data)
+    @test norm(@tensor scheme.T[1, 1][1 1; 2 3 2 3]) ≈ 1
 end

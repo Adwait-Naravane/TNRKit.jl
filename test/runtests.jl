@@ -11,4 +11,5 @@ include("schemes_honeycomb.jl") # do they give the correct results (with the exp
 include("models.jl") # do they give the correct results (with the expected accuracy)?
 include("fermions.jl") # do they give the correct results (with the expected accuracy)?
 include("entropies.jl") # do they work?
+include("ttnr.jl") # do ThermalTNR and TNO behave as expected?
 include("algebras.jl")

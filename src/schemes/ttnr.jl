@@ -31,6 +31,8 @@ struct TNO{E, S, TT <: TNOTensor{E, S}} <: AbstractMatrix{TT}
     A::Matrix{TT}
 
     function TNO(A::AbstractMatrix{TT}) where {E, S, TT <: TNOTensor{E, S}}
+        size(A, 1) > 0 || throw(ArgumentError("The unit cell must have a positive number of rows."))
+        size(A, 2) > 0 || throw(ArgumentError("The unit cell must have a positive number of columns."))
         return new{E, S, TT}(Matrix(A))
     end
 end
@@ -43,10 +45,12 @@ function TNO(A::TT; unitcell::Tuple{Int, Int} = (1, 1)) where {E, S, TT <: TNOTe
 end
 
 Base.IndexStyle(::Type{<:TNO}) = IndexCartesian()
+Base.eltype(::Type{TNO{E, S, TT}}) where {E, S, TT} = TT
 Base.size(tno::TNO) = size(tno.A)
 Base.axes(tno::TNO) = axes(tno.A)
 Base.getindex(tno::TNO, i::Int, j::Int) = tno.A[i, j]
 Base.setindex!(tno::TNO, value, i::Int, j::Int) = setindex!(tno.A, value, i, j)
+Base.copy(tno::TNO) = TNO(copy(tno.A))
 
 """
     $(TYPEDEF)
@@ -160,25 +164,12 @@ function QR_two_pepo(O1::TNOTensor, O2::TNOTensor, ind::Int; side = :left)
     end
 end
 
-function QR_two_pepo(
-        O1::TNOTensor, O2::TNOTensor, O3::TNOTensor, O4::TNOTensor,
-        ind1::Int, ind2::Int; side = :left
-    )
-    if side == :left
-        return QR_two_pepo_left(O1, O2, ind1)
-    elseif side == :right
-        return QR_two_pepo_right(O3, O4, ind2)
-    else
-        throw(ArgumentError("side should be :left or :right"))
-    end
-end
-
 function R1R2(
         A1::TNOTensor, A2::TNOTensor, A3::TNOTensor, A4::TNOTensor,
         ind1::Int, ind2::Int; check_space = true
     )
-    RA1 = QR_two_pepo(A1, A2, A3, A4, ind1, ind1)
-    RA2 = QR_two_pepo(A1, A2, A3, A4, ind2, ind2; side = :right)
+    RA1 = QR_two_pepo_left(A1, A2, ind1)
+    RA2 = QR_two_pepo_right(A3, A4, ind2)
     if check_space && domain(RA1) != codomain(RA2)
         throw(ArgumentError("space mismatch"))
     end
