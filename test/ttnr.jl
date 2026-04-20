@@ -1,8 +1,5 @@
 @testset "TNO" begin
-    local_tensor = TensorMap(
-        reshape(collect(1.0:64.0), 2, 2, 2, 2, 2, 2),
-        ℂ^2 ⊗ (ℂ^2)' ← ℂ^2 ⊗ ℂ^2 ⊗ (ℂ^2)' ⊗ (ℂ^2)'
-    )
+    local_tensor = randn(ℂ^2 ⊗ (ℂ^2)' ← ℂ^2 ⊗ ℂ^2 ⊗ (ℂ^2)' ⊗ (ℂ^2)')
 
     tno = TNO(local_tensor; unitcell = (2, 3))
     @test size(tno) == (2, 3)
@@ -29,10 +26,7 @@
 end
 
 @testset "TNO apply!" begin
-    local_tensor = TensorMap(
-        reshape(collect(1.0:64.0), 2, 2, 2, 2, 2, 2),
-        ℂ^2 ⊗ (ℂ^2)' ← ℂ^2 ⊗ ℂ^2 ⊗ (ℂ^2)' ⊗ (ℂ^2)'
-    )
+    local_tensor = randn(ℂ^2 ⊗ (ℂ^2)' ← ℂ^2 ⊗ ℂ^2 ⊗ (ℂ^2)' ⊗ (ℂ^2)')
 
     top = TNO(local_tensor; unitcell = (2, 2))
     bottom = TNO(local_tensor; unitcell = (2, 2))
@@ -43,10 +37,7 @@ end
     @test space(merged[1, 1], 1) == space(top[1, 1], 1)
     @test space(merged[1, 1], 2) == space(bottom[1, 1], 2)
 
-    bad_tensor = TensorMap(
-        reshape(collect(1.0:128.0), 2, 4, 2, 2, 2, 2),
-        ℂ^2 ⊗ (ℂ^4)' ← ℂ^2 ⊗ ℂ^2 ⊗ (ℂ^2)' ⊗ (ℂ^2)'
-    )
+    bad_tensor = randn(ℂ^2 ⊗ (ℂ^4)' ← ℂ^2 ⊗ ℂ^2 ⊗ (ℂ^2)' ⊗ (ℂ^2)')
     @test_throws ArgumentError apply!(TNO(bad_tensor; unitcell = (2, 2)), bottom, truncrank(8))
 
     scheme_top = ThermalTNR(TNO(local_tensor; unitcell = (1, 1)))
@@ -55,10 +46,8 @@ end
 end
 
 @testset "ThermalTNR finalize!" begin
-    local_tensor = TensorMap(
-        reshape(collect(1.0:64.0), 2, 2, 2, 2, 2, 2),
-        ℂ^2 ⊗ (ℂ^2)' ← ℂ^2 ⊗ ℂ^2 ⊗ (ℂ^2)' ⊗ (ℂ^2)'
-    )
+    local_tensor = randn(ℂ^2 ⊗ (ℂ^2)' ← ℂ^2 ⊗ ℂ^2 ⊗ (ℂ^2)' ⊗ (ℂ^2)')
+
 
     tno = TNO([copy(local_tensor) for _ in 1:2, _ in 1:2])
     scheme = ThermalTNR(tno)
@@ -71,10 +60,7 @@ end
 end
 
 @testset "ThermalTNR run!" begin
-    local_tensor = TensorMap(
-        reshape(collect(1.0:64.0), 2, 2, 2, 2, 2, 2),
-        ℂ^2 ⊗ (ℂ^2)' ← ℂ^2 ⊗ ℂ^2 ⊗ (ℂ^2)' ⊗ (ℂ^2)'
-    )
+    local_tensor = randn(ℂ^2 ⊗ (ℂ^2)' ← ℂ^2 ⊗ ℂ^2 ⊗ (ℂ^2)' ⊗ (ℂ^2)')
 
     scheme = ThermalTNR(TNO(local_tensor; unitcell = (1, 1)))
     layer = TNO(local_tensor; unitcell = (1, 1))
