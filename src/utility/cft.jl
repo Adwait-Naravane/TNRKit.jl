@@ -1,75 +1,128 @@
-function next_τ(τ)
-    return (τ - 1) / (τ + 1)
+# Extensions on top of TensorKit.SectorVector
+Base.broadcasted(f, v::TensorKit.SectorVector) = TensorKit.SectorVector(broadcast(f, parent(v)), v.structure)
+Base.broadcasted(f, v::TensorKit.SectorVector, a) = TensorKit.SectorVector(broadcast(f, parent(v), a), v.structure)
+Base.broadcasted(f, a, v::TensorKit.SectorVector) = TensorKit.SectorVector(broadcast(f, a, parent(v)), v.structure)
+function Base.broadcasted(f, v1::TensorKit.SectorVector, v2::TensorKit.SectorVector)
+    if v1.structure != v2.structure
+        throw(ArgumentError("Cannot broadcast two SectorVectors with different structures"))
+    end
+    return TensorKit.SectorVector(broadcast(f, parent(v1), parent(v2)), v1.structure)
 end
 
-function cft_data(scheme::TNRScheme; v = 1, unitcell = 1, is_real = true)
-    # make the indices
-    indices = [[i, -i, -(i + unitcell), i + 1] for i in 1:unitcell]
-    indices[end][4] = 1
+function Base.filter(f, v::TensorKit.SectorVector)
+    data = copy(parent(v))
+    structure = copy(v.structure)
 
-    T = ncon(fill(scheme.T, unitcell), indices)
-
-    outinds = Tuple(collect(1:unitcell))
-    ininds = Tuple(collect((unitcell + 1):(2unitcell)))
-
-    T = permute(T, (outinds, ininds))
-    D, _ = eig_full(T)
-
-    data = zeros(ComplexF64, dim(space(D, 1)))
-
-    i = 1
-    for (_, b) in blocks(D)
-        for I in LinearAlgebra.diagind(b)
-            data[i] = b[I]
-            i += 1
-        end
+    kept_inds = findall(f, parent(v))
+    sectors = keys(structure)
+    for (i, sector) in enumerate(sectors)
+        structure[sector] = i == 1 ? (1:findlast(x -> x <= structure[sector].stop, kept_inds)) : ((structure[sectors[i - 1]].stop + 1):findlast(x -> x <= structure[sector].stop, kept_inds))
     end
-
-    data = sort(data; by = x -> abs(x), rev = true) # sorting by magnitude
-    data = filter(x -> real(x) > 0, data) # filtering out negative real values
-    data = filter(x -> abs(x) > 1.0e-12, data) # filtering out small values
-
-    if is_real
-        data = real(data)
-    end
-
-    return unitcell * (1 / (2π * v)) * log.(data[1] ./ data)
+    data = data[kept_inds]
+    return TensorKit.SectorVector(data, structure)
 end
 
-function cft_data(scheme::BTRG; v = 1, unitcell = 1, is_real = true)
-    # make the indices
-    indices = [[i, -i, -(i + unitcell), i + 1] for i in 1:unitcell]
-    indices[end][4] = 1
+function Base.sort(v::TensorKit.SectorVector; kwargs...)
+    # sort within the sectors, then concatenate the data and update the structure
+    # Ideally this would sort the total data, but sectorvectors are only compatible with
+    # structures that contain unitranges, we cannot interweave the data of different sectors.
+    data = copy(parent(v))
+    newdata = similar(data)
+    structure = copy(v.structure)
+    sectors = keys(structure)
+    for sector in sectors
+        newdata[structure[sector]] = sort(data[structure[sector]]; kwargs...)
+    end
+    return TensorKit.SectorVector(newdata, structure)
+end
 
+Base.:*(a::Number, v::TensorKit.SectorVector) = scale(v, a)
+Base.:*(v::TensorKit.SectorVector, a::Number) = scale(v, a)
+
+"""
+    CFTData{E, I} where {E, I}
+
+A struct to hold conformal data extracted from a TNR scheme.
+
+### Constructors
+
+
+### Fields
+    - `central_charge::Union{E, Missing}`: The central charge of the CFT. Will be `nothing` if not calculated.
+    - `scaling_dimensions::TensorKit.SectorVector{E, I}`: The scaling dimensions of the CFT, organized in a `TensorKit.SectorVector` where the sectors correspond to different spin sectors (or other quantum numbers) and the data contains the scaling dimensions within those sectors
+
+"""
+struct CFTData{E, I}
+    "Central charge of the CFT. Will be `nothing` if not calculated."
+    central_charge::Union{E, Missing}
+
+    "Scaling dimensions of the CFT."
+    scaling_dimensions::TensorKit.SectorVector{E, I}
+end
+
+function Base.show(io::IO, data::CFTData)
+    println(io, "CFTData")
+    println(io, "  * central charge: $(data.central_charge)")
+    println(io, "  * scaling dimensions: $(data.scaling_dimensions)")
+    return nothing
+end
+
+function CFTData(T::TensorMap{E, S, 2, 2}; shape = [sqrt(2), 2 * sqrt(2), 0], kwargs...) where {E, S}
+    if shape == [1, 1, 0] # trivial implementation
+        return CFTData(missing, _scaling_dimensions(T))
+    else
+        CFTData(T, T; shape, kwargs...)
+    end
+end
+CFTData(scheme::TNRScheme; kwargs...) = CFTData(scheme.T; kwargs...) # simple 1-site unitcell schemes
+CFTData(scheme::LoopTNR; kwargs...) = CFTData(scheme.TA, scheme.TB; kwargs...) # simple 1-site unitcell schemes
+function CFTData(scheme::BTRG; kwargs...) # merge bond tensors into central tensor
     @tensor T_unit[-1 -2; -3 -4] := scheme.T[1 2; -3 -4] * scheme.S1[-2; 2] *
         scheme.S2[-1; 1]
-    T = ncon(fill(T_unit, unitcell), indices)
+    return CFTData(T_unit; kwargs...)
+end
+
+# Main implementation, two-site unitcell
+function CFTData(TA::TensorMap{E, S, 2, 2}, TB::TensorMap{E, S, 2, 2}; shape = [sqrt(2), 2 * sqrt(2), 0], trunc = truncrank(16), truncentanglement = trunctol(; rtol = 1.0e-14)) where {E, S}
+    if shape == [1, 1, 0]
+        throw(ArgumentError("The shape [1, 1, 0] is not compatible with a two-site unit cell."))
+    elseif (shape ≈ [sqrt(2), 2 * sqrt(2), 0]) || (shape == [1, 4, 1]) # these shapes need no truncation
+        norm_const = area_term(TA, TB)^(1 / 4) # canonical normalisation constant
+        return spec(TA / norm_const, TB / norm_const, shape)
+    elseif (shape == [1, 8, 1]) || (shape ≈ [4 / sqrt(10), 2 * sqrt(10), 2 / sqrt(10)])
+
+        norm_const = area_term(TA, TB)^(1 / 4) # canonical normalisation constant
+
+        dl, ur, ul, dr = MPO_opt(
+            TA / norm_const, TB / norm_const, trunc, truncentanglement
+        )
+        T = reduced_MPO(dl, ur, ul, dr, trunc)
+        return spec(T, T, shape)
+    else
+        throw(ArgumentError("Shape $shape is not implemented."))
+    end
+end
+
+# Trivial diagonalisation of the transfer matrix. Currently the v and unitcell are not acessible from the outside.
+# The user should really be using the other shapes anyways.
+function _scaling_dimensions(T::TensorMap{E, S, 2, 2}; v = 1, unitcell = 1) where {E, S}
+    # stack unitcell copies of T and trace
+    indices = [[i, -i, -(i + unitcell), i + 1] for i in 1:unitcell]
+    indices[end][4] = 1
+
+    T = ncon(fill(T, unitcell), indices)
 
     outinds = Tuple(collect(1:unitcell))
     ininds = Tuple(collect((unitcell + 1):(2unitcell)))
 
     T = permute(T, (outinds, ininds))
-    D, _ = eig_full(T)
 
-    data = zeros(ComplexF64, dim(space(D, 1)))
-
-    i = 1
-    for (_, b) in blocks(D)
-        for I in LinearAlgebra.diagind(b)
-            data[i] = b[I]
-            i += 1
-        end
-    end
-
+    data = eig_vals(T)
     data = sort(data; by = x -> abs(x), rev = true) # sorting by magnitude
     data = filter(x -> real(x) > 0, data) # filtering out negative real values
     data = filter(x -> abs(x) > 1.0e-12, data) # filtering out small values
 
-    if is_real
-        data = real(data)
-    end
-
-    return unitcell * (1 / (2π * v)) * log.(data[1] ./ data)
+    return unitcell * (1 / (2π * v)) .* log.(data[1] ./ data)
 end
 
 """
@@ -98,64 +151,7 @@ function area_term(A, B; is_real = true)
     end
 end
 
-function MPO_opt(
-        TA::TensorMap, TB::TensorMap, trunc::TruncationStrategy,
-        truncentanglement::TruncationStrategy
-    )
-    pretrunc = truncrank(2 * trunc.howmany)
-    dl, ur = SVD12(TA, pretrunc)
-    dr, ul = SVD12(transpose(TB, ((2, 4), (1, 3))), pretrunc)
-
-    transfer_MPO = [
-        transpose(dl, ((1,), (3, 2))), ur, transpose(ul, ((2,), (3, 1))),
-        transpose(dr, ((3,), (2, 1))),
-    ]
-
-    in_inds = [1, 1, 1, 1]
-    out_inds = [1, 2, 2, 1]
-    MPO_function(steps, data) = abs(data[end])
-    criterion = maxiter(10) & convcrit(1.0e-12, MPO_function)
-    PR_list, PL_list = find_projectors(
-        transfer_MPO, in_inds, out_inds, criterion,
-        trunc & truncentanglement
-    )
-
-    MPO_disentangled!(transfer_MPO, in_inds, out_inds, PR_list, PL_list)
-    return transfer_MPO
-end
-
-function reduced_MPO(
-        dl::TensorMap, ur::TensorMap, ul::TensorMap, dr::TensorMap,
-        trunc::TruncationStrategy
-    )
-    @plansor temp[-1 -2; -3 -4] := ur[-1; 1 4] *
-        ul[4; 3 -2] *
-        dr[-3; 2 1] * dl[2; -4 3]
-    D, U = SVD12(temp, trunc)
-    @plansor translate[-1 -2; -3 -4] := U[-2; 1 -4] * D[-1 1; -3]
-    return translate
-end
-
-function MPO_action_1x4(TA::TensorMap, TB::TensorMap, x::TensorMap)
-    @tensor TTTTx[-1 -2 -3 -4; -5] := x[1 2 3 4; -5] * TA[41 -1; 1 12] *
-        TB[12 -2; 2 23] *
-        TA[23 -3; 3 34] * TB[34 -4; 4 41]
-    return TTTTx
-end
-
-function MPO_action_1x4_twist(TA::TensorMap, TB::TensorMap, x::TensorMap)
-    TTTTx = MPO_action_1x4(TA, TB, x)
-    return permute(TTTTx, ((2, 3, 4, 1), (5,)))
-end
-
-# Fig.25 of https://arxiv.org/pdf/2311.18785. Firstly appear in Chenfeng Bao's thesis, see http://hdl.handle.net/10012/14674.
-function MPO_action_2gates(TA::TensorMap, TB::TensorMap, x::TensorMap)
-    @tensor fx[-1 -2 -3 -4; 5] := TB[-1 -2; 1 2] * x[1 2 3 4; 5] * TB[-3 -4; 3 4]
-    @tensor ffx[-1 -2 -3 -4; 5] := TA[-3 -4; 2 3] * fx[1 2 3 4; 5] *
-        TA[-1 -2; 4 1]
-    return permute(ffx, ((2, 3, 4, 1), (5,)))
-end
-
+# The case with spin is based on https://arxiv.org/pdf/1512.03846 and some private communications with Yingjie Wei and Atsushi Ueda
 function spec(TA::TensorMap, TB::TensorMap, shape::Array; Nh = 25)
     area = shape[1] * shape[2]
     Imτ = shape[1] / shape[2]
@@ -198,72 +194,88 @@ function spec(TA::TensorMap, TB::TensorMap, shape::Array; Nh = 25)
         end
     )
 
-    conformal_data = Dict()
-
     norm_const_0 = spec_sector[one(I)][1]
-    conformal_data["c"] = 6 / pi / (Imτ - area / 4) * log(norm_const_0)
+    central_charge = 6 / pi / (Imτ - area / 4) * log(norm_const_0)
 
+    # Construct a SectorVector from the data of the different sectors
+    data = ComplexF64[]
+    structure = TensorKit.SectorDict{sectortype(xspace), UnitRange{Int}}()
+    last_index = 1
     for charge in sectors(fuse(xspace))
         DeltaS = -1 / (2 * pi * Imτ) * log.(spec_sector[charge] / norm_const_0)
         if !(relative_shift ≈ 0)
-            conformal_data[charge] = real.(DeltaS) + imag.(DeltaS) / relative_shift * im
+            push!(data, (real.(DeltaS) + imag.(DeltaS) / relative_shift * im)...)
+            structure[charge] = last_index:(last_index + length(DeltaS) - 1)
         else
-            conformal_data[charge] = DeltaS
+            push!(data, real.(DeltaS)...)
+            structure[charge] = last_index:(last_index + length(DeltaS) - 1)
         end
+        last_index += length(DeltaS)
     end
-    return conformal_data
+
+    sv = TensorKit.SectorVector(data, structure)
+    sv = sort(sv; by = real)
+    sv = filter(x -> real(x) ≤ 1.0e16, sv)
+
+    return CFTData(central_charge, sv)
 end
 
-# The function to obtain central charge and conformal spectrum from the fixed-point tensor with G-symmetry. Here the conformal spectrum is obtained by different charge sectors.
-# The case with spin is based on https://arxiv.org/pdf/1512.03846 and some private communications with Yingjie Wei and Atsushi Ueda
-function cft_data(
-        scheme::LoopTNR, shape::Array,
-        trunc::TruncationStrategy,
+function MPO_opt(
+        TA::TensorMap, TB::TensorMap, trunc::TruncationStrategy,
         truncentanglement::TruncationStrategy
     )
-    if !(shape in [[1, 8, 1], [4 / sqrt(10), 2 * sqrt(10), 2 / sqrt(10)]])
-        throw(ArgumentError("The shape $shape is not correct."))
-    end
+    pretrunc = truncrank(2 * trunc.howmany)
+    dl, ur = SVD12(TA, pretrunc)
+    dr, ul = SVD12(transpose(TB, ((2, 4), (1, 3))), pretrunc)
 
-    @infov 2 "CFT data calculating"
-    norm_const = area_term(scheme.TA, scheme.TB)^(1 / 4)
-    dl, ur, ul, dr = MPO_opt(
-        scheme.TA / norm_const, scheme.TB / norm_const, trunc, truncentanglement
+    transfer_MPO = [
+        transpose(dl, ((1,), (3, 2))), ur, transpose(ul, ((2,), (3, 1))),
+        transpose(dr, ((3,), (2, 1))),
+    ]
+
+    in_inds = [1, 1, 1, 1]
+    out_inds = [1, 2, 2, 1]
+    MPO_function(steps, data) = abs(data[end])
+    criterion = maxiter(10) & convcrit(1.0e-12, MPO_function)
+    PR_list, PL_list = find_projectors(
+        transfer_MPO, in_inds, out_inds, criterion,
+        trunc & truncentanglement
     )
-    T = reduced_MPO(dl, ur, ul, dr, trunc)
 
-    # Calculate conformal data with spin from -4 to 4. Most error is introduced in the second step of the SVD.
-    conformal_data = spec(T, T, shape)
-    return conformal_data
+    MPO_disentangled!(transfer_MPO, in_inds, out_inds, PR_list, PL_list)
+    return transfer_MPO
 end
 
-function cft_data(scheme::LoopTNR, shape::Array)
-    if !(shape in [[1, 4, 1], [sqrt(2), 2 * sqrt(2), 0]])
-        throw(ArgumentError("The shape $shape is not correct."))
-    end
-
-    @infov 2 "CFT data calculating"
-    norm_const = area_term(scheme.TA, scheme.TB)^(1 / 4)
-    conformal_data = spec(scheme.TA / norm_const, scheme.TB / norm_const, shape)
-    return conformal_data
+# Apply functions for diagonalising different shapes of transfer matrices
+# =======================================================================
+# Fig.25 of https://arxiv.org/pdf/2311.18785. Firstly appear in Chenfeng Bao's thesis, see http://hdl.handle.net/10012/14674.
+function MPO_action_2gates(TA::TensorMap, TB::TensorMap, x::TensorMap)
+    @tensor fx[-1 -2 -3 -4; 5] := TB[-1 -2; 1 2] * x[1 2 3 4; 5] * TB[-3 -4; 3 4]
+    @tensor ffx[-1 -2 -3 -4; 5] := TA[-3 -4; 2 3] * fx[1 2 3 4; 5] *
+        TA[-1 -2; 4 1]
+    return permute(ffx, ((2, 3, 4, 1), (5,)))
 end
 
-"""
-    central_charge(scheme::TNRScheme, n::Number)
-
-Get the central charge given the current state of a `TNRScheme` and the previous normalization factor `n`
-"""
-function central_charge(scheme::TNRScheme, n::Number)
-    @tensor M[-1; -2] := (scheme.T / n)[1 -1; -2 1]
-    _, S, _ = svd_compact(M)
-    return log(S.data[1]) * 6 / (π)
+function MPO_action_1x4(TA::TensorMap, TB::TensorMap, x::TensorMap)
+    @tensor TTTTx[-1 -2 -3 -4; -5] := x[1 2 3 4; -5] * TA[41 -1; 1 12] *
+        TB[12 -2; 2 23] *
+        TA[23 -3; 3 34] * TB[34 -4; 4 41]
+    return TTTTx
 end
 
-function central_charge(scheme::BTRG, n::Number)
-    @tensor M[-1; -2] := (
-        (scheme.T)[1 -1; 3 2] * scheme.S1[3; -2] *
-            scheme.S2[2; 1]
-    ) / n
-    _, S, _ = svd_compact(M)
-    return log(S.data[1]) * 6 / (π)
+function MPO_action_1x4_twist(TA::TensorMap, TB::TensorMap, x::TensorMap)
+    TTTTx = MPO_action_1x4(TA, TB, x)
+    return permute(TTTTx, ((2, 3, 4, 1), (5,)))
+end
+
+function reduced_MPO(
+        dl::TensorMap, ur::TensorMap, ul::TensorMap, dr::TensorMap,
+        trunc::TruncationStrategy
+    )
+    @plansor temp[-1 -2; -3 -4] := ur[-1; 1 4] *
+        ul[4; 3 -2] *
+        dr[-3; 2 1] * dl[2; -4 3]
+    D, U = SVD12(temp, trunc)
+    @plansor translate[-1 -2; -3 -4] := U[-2; 1 -4] * D[-1 1; -3]
+    return translate
 end

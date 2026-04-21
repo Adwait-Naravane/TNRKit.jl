@@ -135,12 +135,14 @@ function finalize_phase23!(scheme::CorrelationHOTRG)
 end
 
 # cft data finalize
-function finalize_cftdata!(scheme::LoopTNR)
+function finalize_cftdata!(scheme::TNRScheme)
     finalize!(scheme)
-    return cft_data(scheme; is_real = true)
+    return CFTData(scheme)
 end
 
-function finalize_cft!(scheme::SLoopTNR)
+CFT_Finalizer = Finalizer(finalize_cftdata!, CFTData)
+
+function finalize_cftdata!(scheme::SLoopTNR) # TODO: remove this
     tr_norm = trnorm_2x2(scheme.T)
     scheme.T /= tr_norm^0.25
     Tflip = flip(scheme.T, (1, 2, 3, 4))
@@ -152,15 +154,8 @@ function finalize_cft!(scheme::SLoopTNR)
     return data
 end
 
-# central charge finalize
-function finalize_central_charge!(scheme::TNRScheme)
-    n = finalize!(scheme)
-    return central_charge(scheme, n)
-end
-
 # TODO: add Finalizers for CFT and central charge
 two_by_two_Finalizer = Finalizer(finalize_two_by_two!, Float64)
-
 
 # Finalizer for ground state degeneracy
 function finalize_groundstatedegeneracy!(scheme::TNRScheme)

@@ -7,7 +7,7 @@ Corner Transfer Matrix environment + Tensor Renormalization Group
     $(FUNCTIONNAME)(T, χenv[, ctm_iter=2.0e4, ctm_tol=1.0e-9])
 
 ### Running the algorithm
-    run!(::ctm_TRG, trunc::TruncationStrategy, criterion::maxiter[, sweep=30, enlarge=true, return_cft=false, inv=false, conv_criterion=1.0e-12, modified=true])
+    run!(::ctm_TRG, trunc::TruncationStrategy, criterion::maxiter[, sweep=30, enlarge=true, inv=false, conv_criterion=1.0e-12, modified=true])
 
 ### Fields
 
@@ -167,14 +167,12 @@ function run!(
         criterion::maxiter;
         sweep = 30,
         enlarge = true,
-        return_cft = false,
         inv = false,
         conv_criterion = 1.0e-12,
         modified = true,
     )
     area = 1
     lnz = 0.0
-    cft = []
 
     steps = 0
     crit = true
@@ -182,9 +180,6 @@ function run!(
         area *= 4.0
         tr_norm = step!(scheme, trunc; sweep = sweep, enlarge = enlarge, inv = inv, modified)
         lnz += log(tr_norm) / area
-        if return_cft
-            push!(cft, cft_data(scheme; unitcell = 2))
-        end
         if abs(log(abs(tr_norm)) / area) <= conv_criterion
             @info "CTM-TRG converged after $steps iterations"
             break
@@ -192,11 +187,7 @@ function run!(
         steps += 1
         crit = criterion(steps, nothing)
     end
-    if return_cft
-        return lnz, cft
-    else
-        return lnz
-    end
+    return lnz
 end
 
 function Base.show(io::IO, scheme::ctm_TRG)
