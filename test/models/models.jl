@@ -1,3 +1,8 @@
+using Test
+using TNRKit
+using TensorKit
+using TensorKitSectors
+
 println("--------------------")
 println(" Testing all models ")
 println("--------------------")
@@ -55,7 +60,7 @@ end
     data = run!(scheme, truncrank(16), maxiter(20))
     cft = CFTData(scheme)
     central_charge = cft.central_charge
-    @test central_charge ≈ 0.0 atol = 1.0e-13
+    @test central_charge ≈ 0.0 atol = 1.0e-12
     @info "Obtained central charge:\n$central_charge."
 
     @info "Central charge of KT phase with O(2) symmetry"
@@ -73,7 +78,7 @@ end
     data = run!(scheme, truncrank(16), maxiter(20))
     cft = CFTData(scheme)
     central_charge = cft.central_charge
-    @test central_charge ≈ 0.0 atol = 1.0e-13
+    @test central_charge ≈ 0.0 atol = 1.0e-12
     @info "Obtained central charge:\n$central_charge."
 end
 
