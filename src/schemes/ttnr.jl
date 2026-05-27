@@ -306,3 +306,82 @@ function Base.show(io::IO, scheme::ThermalTNR)
     println(io, "  * tensor: $(summary(scheme.T[1, 1]))")
     return nothing
 end
+
+# ─────────────────────────────── Entanglement Filtering ──────────────────────────────────
+
+"""
+    default_entanglement_criterion
+
+Default stopping criterion for the inner entanglement-filtering loop:
+at most 100 power-iteration sweeps, converging when the projector change
+drops below `1e-15`.
+"""
+const default_entanglement_criterion = maxiter(100) & convcrit(1.0e-15, (steps, data) -> abs(data[end]))
+
+# Arrange the four corners of a 2×2 unit cell into a ring of permuted tensors
+# suitable for `find_projectors`.  Each tensor is permuted so that the shared
+# inner-plaquette virtual bond sits at codomain index 1 and the remaining five
+# indices fill the domain.
+function _psi_A(unitcell_2x2::Matrix{<:TNOTensor})
+    return [
+        permute(unitcell_2x2[1, 1], ((5,), (1, 2, 6, 3, 4)); copy = true),
+        permute(unitcell_2x2[1, 2], ((6,), (1, 2, 3, 4, 5)); copy = true),
+        permute(unitcell_2x2[2, 2], ((3,), (1, 2, 4, 5, 6)); copy = true),
+        permute(unitcell_2x2[2, 1], ((4,), (1, 2, 5, 6, 3)); copy = true),
+    ]
+end
+
+"""
+    entanglement_filtering(unitcell_2x2, trunc[, entanglement_criterion]) -> Matrix
+
+Apply one round of entanglement filtering to a 2×2 unit cell of
+[`TNOTensor`](@ref)s and return a new filtered matrix.
+
+The four inner virtual bonds that form the central plaquette loop are
+truncated according to `trunc` using the iterative projector-finding
+procedure from the LoopTNR framework.  The input `unitcell_2x2` is not
+modified.
+
+See also: [`entanglement_filtering!`](@ref), [`default_entanglement_criterion`](@ref)
+"""
+function entanglement_filtering(
+        unitcell_2x2::Matrix{<:TNOTensor{E, S}}, trunc::TruncationStrategy,
+        entanglement_criterion::stopcrit = default_entanglement_criterion
+    ) where {E, S}
+    size(unitcell_2x2) == (2, 2) ||
+        throw(ArgumentError("Input unit cell must have 2×2 size; got $(size(unitcell_2x2))."))
+    result = copy(unitcell_2x2)
+    ΨA = _psi_A(result)
+    PRs, PLs = find_projectors(ΨA, [1, 1, 1, 1], [5, 5, 5, 5], entanglement_criterion, trunc)
+    @tensor result[1, 1][-1 -2; -3 -4 -5 -6] := PRs[2][4; -4] * result[1, 1][-1 -2; -3 4 5 -6] * PLs[1][-5; 5]
+    @tensor result[1, 2][-1 -2; -3 -4 -5 -6] := PRs[3][5; -5] * result[1, 2][-1 -2; -3 -4 5 6] * PLs[2][-6; 6]
+    @tensor result[2, 2][-1 -2; -3 -4 -5 -6] := PRs[4][6; -6] * result[2, 2][-1 -2; 3 -4 -5 6] * PLs[3][-3; 3]
+    @tensor result[2, 1][-1 -2; -3 -4 -5 -6] := PRs[1][3; -3] * result[2, 1][-1 -2; 3 4 -5 -6] * PLs[4][-4; 4]
+    return result
+end
+
+"""
+    entanglement_filtering!(scheme, trunc[, entanglement_criterion]) -> scheme
+
+Apply entanglement filtering to a [`ThermalTNR`](@ref) scheme in-place and
+return it.
+
+Calls [`entanglement_filtering`](@ref) over all four 2×2 plaquettes formed by
+cyclically shifting the unit cell, accumulating the filtered result back into
+`scheme.T`.
+
+See also: [`entanglement_filtering`](@ref), [`default_entanglement_criterion`](@ref)
+"""
+function entanglement_filtering!(
+        scheme::ThermalTNR, trunc::TruncationStrategy,
+        entanglement_criterion::stopcrit = default_entanglement_criterion
+    )
+    A = copy(scheme.T.A)
+    for s in ((0, 0), (1, 0), (0, 1), (1, 1))
+        shifted = circshift(A, s)
+        filtered = entanglement_filtering(shifted, trunc, entanglement_criterion)
+        A = circshift(filtered, (-s[1], -s[2]))
+    end
+    scheme.T = TNO(A)
+    return scheme
+end

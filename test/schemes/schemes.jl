@@ -669,3 +669,22 @@ end
         @test x1_above ≈ 1 rtol = 5.0e-2
     end
 end
+
+println("----------------------------------------")
+println(" Testing ThermalTNR entanglement filtering ")
+println("----------------------------------------")
+
+# Use the Z₂ gauge theory dual as a test model — it naturally produces TNOTensors
+# and the ThermalTNR physics with it is already validated in schemes.jl.
+const _β_ef = 0.65
+
+@testset "entanglement_filtering! — ThermalTNR still runs after filtering" begin
+    # Verify that entanglement filtering does not corrupt the TNO structure by
+    # checking that a subsequent ThermalTNR run completes without error.
+    T = ZN_gauge_theory_dual(2, _β_ef)
+    scheme = ThermalTNR([T T; T T])
+    layer = copy(scheme)
+
+    entanglement_filtering!(scheme, truncrank(8))
+    @test_nowarn run!(scheme, layer.T, truncrank(8), maxiter(2); verbosity = 0)
+end
