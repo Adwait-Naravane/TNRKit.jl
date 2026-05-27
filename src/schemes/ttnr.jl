@@ -316,7 +316,7 @@ Default stopping criterion for the inner entanglement-filtering loop:
 at most 100 power-iteration sweeps, converging when the projector change
 drops below `1e-15`.
 """
-const default_entanglement_criterion = maxiter(100) & convcrit(1.0e-15, (steps, data) -> abs(data[end]))
+default_entanglement_criterion = maxiter(100) & convcrit(1.0e-15, (steps, data) -> abs(data[end]))
 
 # Arrange the four corners of a 2×2 unit cell into a ring of permuted tensors
 # suitable for `find_projectors`.  Each tensor is permuted so that the shared
